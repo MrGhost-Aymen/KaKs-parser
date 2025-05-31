@@ -12,7 +12,7 @@ Error Handling: Reports errors for invalid files or data rows.
 
 Installation
 
-Clone the repository:git clone https://github.com/your-username/kaks-parser.git
+Clone the repository:git clone https://github.com/MrGhost-Aymen/kaks-parser.git
 
 
 Navigate to the project directory:cd kaks-parser
@@ -52,18 +52,6 @@ Seq_1	Seq_2	Ka	Ks	Effective_Len
 GeneA	GeneB	0.1	0.2	150
 GeneC	GeneD	0.15	0.1	200
 
-Contributing
-Contributions are welcome! To contribute:
-
-Fork the repository.
-Create a new branch:git checkout -b feature/your-feature
-
-
-Make changes and commit:git commit -m "Add your feature"
-
-
-Push to your fork:git push origin feature/your-feature
-
 
 Open a pull request.
 
@@ -85,4 +73,4 @@ Include visualizations (e.g., Ka/Ks histograms) using Chart.js.
 License
 This project is licensed under the MIT License. See the LICENSE file for details.
 Contact
-For questions or feedback, open an issue or contact your-email@example.com.
+For questions or feedback, open an issue or contact ouamoa@gmail.com .
