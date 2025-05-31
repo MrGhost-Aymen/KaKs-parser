@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KaKs Parser</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .upload-area {
+            border: 2px dashed #3498db;
+            border-radius: 5px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            background-color: #f8f9fa;
+        }
+        .upload-area:hover {
+            background-color: #e9f7fe;
+        }
+        #file-input {
+            display: none;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .filter-area {
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .filter-area input[type="text"], .filter-area input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .filter-area label {
+            margin-left: 10px;
+            font-size: 16px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            margin-bottom: 30px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .summary {
+            background-color: #e8f4f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .file-info {
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid #3498db;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .consolidated-table {
+            margin-bottom: 40px;
+        }
+        .number-cell {
+            text-align: right;
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>KaKs File Parser</h1>
+        <p>Upload multiple .xls files with Ka/Ks data to generate a report with averages of Ka, Ks, and Ka/Ks.</p>
+        
+        <div class="upload-area" id="drop-area">
+            <p>Drag & drop your .xls files here or</p>
+            <input type="file" id="file-input" multiple accept=".xls,.xlsx,.txt,.tsv,.csv">
+            <button class="btn" id="browse-btn">Browse Files</button>
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing files...</p>
+        </div>
+        
+        <div class="filter-area" id="filter-area" style="display: none;">
+            <input type="text" id="search-box" placeholder="Filter by gene name...">
+            <label><input type="checkbox" id="kaks-filter"> Show only Ka/Ks > 1</label>
+            <input type="number" id="efflen-filter" placeholder="Min Effective Length" min="0" step="1">
+            <button class="btn" id="clear-filters">Clear Filters</button>
+            <button class="btn" id="export-consolidated">Export Consolidated CSV</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropArea = document.getElementById('drop-area');
+            const fileInput = document.getElementById('file-input');
+            const browseBtn = document.getElementById('browse-btn');
+            const resultsDiv = document.getElementById('results');
+            const loadingDiv = document.getElementById('loading');
+            const filterArea = document.getElementById('filter-area');
+            const searchBox = document.getElementById('search-box');
+            const kaksFilter = document.getElementById('kaks-filter');
+            const effLenFilter = document.getElementById('efflen-filter');
+            const clearFiltersBtn = document.getElementById('clear-filters');
+            const exportConsolidatedBtn = document.getElementById('export-consolidated');
+            
+            let allResults = []; // Store results for filtering
+            
+            // Prevent default drag behaviors
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            // Highlight drop area
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            // Handle dropped files
+            dropArea.addEventListener('drop', handleDrop, false);
+            
+            // Handle file selection via button
+            browseBtn.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    processFiles(this.files);
+                }
+            });
+            
+            // Filter events
+            searchBox.addEventListener('input', () => displayResults(allResults));
+            kaksFilter.addEventListener('change', () => displayResults(allResults));
+            effLenFilter.addEventListener('input', () => displayResults(allResults));
+            clearFiltersBtn.addEventListener('click', () => {
+                searchBox.value = '';
+                kaksFilter.checked = false;
+                effLenFilter.value = '';
+                displayResults(allResults);
+            });
+            
+            exportConsolidatedBtn.addEventListener('click', () => {
+                exportConsolidatedCSV(allResults);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            function highlight() {
+                dropArea.style.backgroundColor = '#e9f7fe';
+                dropArea.style.borderColor = '#2980b9';
+            }
+            
+            function unhighlight() {
+                dropArea.style.backgroundColor = '#f8f9fa';
+                dropArea.style.borderColor = '#3498db';
+            }
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    processFiles(files);
+                }
+            }
+            
+            function processFiles(files) {
+                loadingDiv.style.display = 'block';
+                resultsDiv.innerHTML = '';
+                filterArea.style.display = 'none';
+                
+                // Filter only allowed files
+                const allowedFiles = Array.from(files).filter(file => {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    return ['xls', 'xlsx', 'txt', 'tsv', 'csv'].includes(ext);
+                });
+                
+                if (allowedFiles.length === 0) {
+                    loadingDiv.style.display = 'none';
+                    resultsDiv.innerHTML = '<p class="error">No valid files found. Please upload files with .xls, .xlsx, .txt, .tsv, or .csv extensions.</p>';
+                    return;
+                }
+                
+                let processedCount = 0;
+                allResults = [];
+                
+                allowedFiles.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const content = e.target.result;
+                            const results = parseXlsFile(content, file.name);
+                            allResults.push(results);
+                        } catch (error) {
+                            console.error(`Error processing file ${file.name}:`, error);
+                            allResults.push({
+                                filename: file.name,
+                                error: error.message
+                            });
+                        }
+                        
+                        processedCount++;
+                        
+                        if (processedCount === allowedFiles.length) {
+                            loadingDiv.style.display = 'none';
+                            filterArea.style.display = 'flex';
+                            displayResults(allResults);
+                        }
+                    };
+                    
+                    reader.onerror = function() {
+                        console.error(`Error reading file ${file.name}`);
+                        allResults.push({
+                            filename: file.name,
+                            error: 'Error reading file'
+                        });
+                        processedCount++;
+                        
+                        if (processedCount === allowedFiles.length) {
+                            loadingDiv.style.display = 'none';
+                            filterArea.style.display = 'flex';
+                            displayResults(allResults);
+                        }
+                    };
+                    
+                    reader.readAsText(file);
+                });
+            }
+            
+            function parseXlsFile(content, filename) {
+                const lines = content.split('\n').filter(line => line.trim() !== '');
+                const results = {
+                    filename: filename,
+                    entries: [],
+                    averages: {
+                        ka: 0,
+                        ks: 0,
+                        ka_ks: 0,
+                        count: 0,
+                        maxKaKs: -Infinity,
+                        minKaKs: Infinity,
+                        countKaksAbove1: 0,
+                        medianKaKs: 0
+                    },
+                    geneCounts: {},
+                    skippedRows: 0
+                };
+                
+                const seenRows = new Set(); // For duplicate detection
+                
+                // Find header line
+                let headerIndex = 0;
+                while (headerIndex < lines.length && 
+                       !lines[headerIndex].toLowerCase().includes('seq_1') && 
+                       !lines[headerIndex].toLowerCase().includes('ka')) {
+                    headerIndex++;
+                }
+                
+                if (headerIndex >= lines.length) {
+                    throw new Error('Could not find header line in file');
+                }
+                
+                const header = lines[headerIndex].split('\t');
+                const kaIndex = header.findIndex(col => col.toLowerCase().includes('ka') && !col.toLowerCase().includes('ka/ks'));
+                const ksIndex = header.findIndex(col => col.toLowerCase().includes('ks') && !col.toLowerCase().includes('ka/ks'));
+                const seq1Index = header.findIndex(col => col.toLowerCase().includes('seq') && col.toLowerCase().includes('1'));
+                const seq2Index = header.findIndex(col => col.toLowerCase().includes('seq') && col.toLowerCase().includes('2'));
+                const effLenIndex = header.findIndex(col => col.toLowerCase().includes('effective_len'));
+                
+                if (kaIndex === -1 || ksIndex === -1 || seq1Index === -1 || seq2Index === -1) {
+                    throw new Error('Required columns (Seq_1, Seq_2, Ka, Ks) not found in file');
+                }
+                
+                // Process data lines
+                for (let i = headerIndex + 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    
+                    const columns = line.split('\t');
+                    if (columns.length <= Math.max(kaIndex, ksIndex, seq1Index, seq2Index, effLenIndex)) {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    
+                    // Safe access for column values
+                    const kaVal = columns[kaIndex] ? columns[kaIndex].trim() : '';
+                    const ksVal = columns[ksIndex] ? columns[ksIndex].trim() : '';
+                    const seq1Val = columns[seq1Index] ? columns[seq1Index].trim() : '';
+                    const seq2Val = columns[seq2Index] ? columns[seq2Index].trim() : '';
+                    const effLenVal = effLenIndex !== -1 && columns[effLenIndex] ? columns[effLenIndex].trim() : '';
+                    
+                    // Skip if Ka or Ks is empty/NA
+                    if (kaVal === 'NA' || ksVal === 'NA' || kaVal === '' || ksVal === '') {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    
+                    const ka = parseFloat(kaVal);
+                    const ks = parseFloat(ksVal);
+                    const effectiveLen = effLenVal ? parseFloat(effLenVal) : Infinity;
+                    
+                    // Skip if we couldn't parse the numbers, Ks is 0, or EffectiveLen < 100
+                    if (isNaN(ka) || isNaN(ks) || ks === 0 || isNaN(effectiveLen) || effectiveLen < 100) {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    
+                    // Skip if sequence names are empty
+                    if (!seq1Val || !seq2Val) {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    
+                    // Check for duplicates
+                    const rowKey = `${seq1Val}|${seq2Val}|${kaVal}|${ksVal}|${effLenVal}`;
+                    if (seenRows.has(rowKey)) {
+                        results.skippedRows++;
+                        continue;
+                    }
+                    seenRows.add(rowKey);
+                    
+                    // Calculate Ka/Ks
+                    const ka_ks = ka / ks;
+                    
+                    // Update metrics
+                    results.averages.maxKaKs = Math.max(results.averages.maxKaKs, ka_ks);
+                    if (ka_ks > 0) {
+                        results.averages.minKaKs = Math.min(results.averages.minKaKs, ka_ks);
+                    }
+                    if (ka_ks > 1.0) {
+                        results.averages.countKaksAbove1++;
+                    }
+                    
+                    // Clean up sequence names
+                    const seq1 = cleanSequenceName(seq1Val);
+                    const seq2 = cleanSequenceName(seq2Val);
+                    
+                    // Track gene comparisons
+                    results.geneCounts[seq1] = (results.geneCounts[seq1] || 0) + 1;
+                    results.geneCounts[seq2] = (results.geneCounts[seq2] || 0) + 1;
+                    
+                    results.entries.push({
+                        sequence1: seq1,
+                        sequence2: seq2,
+                        ka: ka,
+                        ks: ks,
+                        ka_ks: ka_ks,
+                        effectiveLen: effectiveLen
+                    });
+                    
+                    results.averages.ka += ka;
+                    results.averages.ks += ks;
+                    results.averages.count++;
+                }
+                
+                // Calculate averages and median
+                if (results.averages.count > 0) {
+                    results.averages.ka /= results.averages.count;
+                    results.averages.ks /= results.averages.count;
+                    results.averages.ka_ks = results.averages.ks !== 0 ? results.averages.ka / results.averages.ks : 0;
+                    // Calculate median Ka/Ks
+                    const kaksValues = results.entries.map(entry => entry.ka_ks).sort((a, b) => a - b);
+                    results.averages.medianKaKs = calculateMedian(kaksValues);
+                    // Sort entries by Ka/Ks in descending order
+                    results.entries.sort((a, b) => b.ka_ks - a.ka_ks);
+                } else {
+                    throw new Error('No valid data rows found in file');
+                }
+                
+                return results;
+            }
+            
+            function cleanSequenceName(name) {
+                // Remove position numbers (e.g., "1 1503")
+                name = name.replace(/\d+\s+\d+\s*[+-]?\s*$/, '');
+                
+                // Extract meaningful parts (species names and gene info)
+                const parts = name.split('__');
+                if (parts.length > 1) {
+                    // Take the last part which usually contains the species info
+                    const lastPart = parts[parts.length - 1];
+                    return lastPart.split('_').slice(0, 3).join(' ').trim();
+                }
+                
+                // Fallback - just take first 3 words
+                return name.split('_').slice(0, 3).join(' ').trim();
+            }
+            
+            function formatNumber(num) {
+                if (num === 0) return '0';
+                if (isNaN(num)) return 'NaN';
+                if (Math.abs(num) < 0.0001) {
+                    return num.toExponential(4);
+                }
+                // Format to 6 decimal places, then remove trailing zeros
+                return num.toFixed(6).replace(/\.?0+$/, '');
+            }
+            
+            function calculateMedian(values) {
+                if (values.length === 0) return 0;
+                const mid = Math.floor(values.length / 2);
+                if (values.length % 2 === 0) {
+                    return (values[mid - 1] + values[mid]) / 2;
+                }
+                return values[mid];
+            }
+            
+            function getKaKsColor(ka_ks) {
+                if (ka_ks < 0.95) return '#3498db'; // Purifying selection (blue)
+                if (ka_ks >= 0.95 && ka_ks <= 1.05) return '#95a5a6'; // Neutral evolution (gray)
+                return '#e74c3c'; // Positive selection (red)
+            }
+            
+            function exportToCSV(filename, rows) {
+                const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+            }
+            
+            function exportConsolidatedCSV(results) {
+                const headers = ['File Name', 'Avg Ka', 'Avg Ks', 'Avg Ka/Ks', 'Max Ka/Ks', 'Min Ka/Ks', 'Ka/Ks > 1', 'Median Ka/Ks', 'Comparisons', 'Skipped Rows'];
+                const rows = [headers];
+                results.filter(result => !result.error).forEach(result => {
+                    rows.push([
+                        result.filename,
+                        formatNumber(result.averages.ka),
+                        formatNumber(result.averages.ks),
+                        formatNumber(result.averages.ka_ks),
+                        result.averages.maxKaKs === -Infinity ? 'N/A' : formatNumber(result.averages.maxKaKs),
+                        result.averages.minKaKs === Infinity ? 'N/A' : formatNumber(result.averages.minKaKs),
+                        result.averages.countKaksAbove1,
+                        formatNumber(result.averages.medianKaKs),
+                        result.averages.count,
+                        result.skippedRows
+                    ]);
+                });
+                exportToCSV('consolidated_results.csv', rows);
+            }
+            
+            function displayResults(allResults) {
+                let html = '';
+                const validResults = allResults.filter(result => !result.error);
+                const errorResults = allResults.filter(result => result.error);
+                
+                // Apply filters
+                const searchTerm = searchBox.value.toLowerCase().trim();
+                const filterKaks = kaksFilter.checked;
+                const minEffLen = effLenFilter.value ? parseFloat(effLenFilter.value) : 0;
+                
+                // Show errors first
+                if (errorResults.length > 0) {
+                    html += '<div class="error">';
+                    html += '<h2>Files with Errors</h2>';
+                    errorResults.forEach(result => {
+                        html += `<p><strong>${result.filename}:</strong> ${result.error}</p>`;
+                    });
+                    html += '</div>';
+                }
+                
+                if (validResults.length === 0) {
+                    resultsDiv.innerHTML = html;
+                    return;
+                }
+                
+                // Consolidated summary table
+                html += '<div class="consolidated-table">';
+                html += '<h2>Consolidated Results</h2>';
+                html += '<table>';
+                html += '<tr><th>File Name</th><th class="number-cell">Avg Ka</th><th class="number-cell">Avg Ks</th><th class="number-cell">Avg Ka/Ks</th><th class="number-cell">Max Ka/Ks</th><th class="number-cell">Min Ka/Ks</th><th class="number-cell">Ka/Ks > 1</th><th class="number-cell">Median Ka/Ks</th><th>Comparisons</th><th>Skipped Rows</th></tr>';
+                
+                validResults.forEach(result => {
+                    html += `<tr>
+                        <td>${result.filename}</td>
+                        <td class="number-cell">${formatNumber(result.averages.ka)}</td>
+                        <td class="number-cell">${formatNumber(result.averages.ks)}</td>
+                        <td class="number-cell">${formatNumber(result.averages.ka_ks)}</td>
+                        <td class="number-cell">${result.averages.maxKaKs === -Infinity ? 'N/A' : formatNumber(result.averages.maxKaKs)}</td>
+                        <td class="number-cell">${result.averages.minKaKs === Infinity ? 'N/A' : formatNumber(result.averages.minKaKs)}</td>
+                        <td class="number-cell">${result.averages.countKaksAbove1}</td>
+                        <td class="number-cell">${formatNumber(result.averages.medianKaKs)}</td>
+                        <td class="number-cell">${result.averages.count}</td>
+                        <td class="number-cell">${result.skippedRows}</td>
+                    </tr>`;
+                });
+                
+                html += '</table>';
+                html += '</div>';
+                
+                // Detailed data for each file
+                validResults.forEach(result => {
+                    html += `<h2>Detailed Data: ${result.filename}</h2>`;
+                    html += `<div class="file-info">Average Ka: ${formatNumber(result.averages.ka)} | Average Ks: ${formatNumber(result.averages.ks)} | Average Ka/Ks: ${formatNumber(result.averages.ka_ks)} | Max Ka/Ks: ${result.averages.maxKaKs === -Infinity ? 'N/A' : formatNumber(result.averages.maxKaKs)} | Min Ka/Ks: ${result.averages.minKaKs === Infinity ? 'N/A' : formatNumber(result.averages.minKaKs)} | Ka/Ks > 1: ${result.averages.countKaksAbove1} | Median Ka/Ks: ${formatNumber(result.averages.medianKaKs)} | Valid Comparisons: ${result.averages.count} | Skipped Rows: ${result.skippedRows}</div>`;
+                    html += `<button class="btn" onclick="exportDetailedCSV('${result.filename}', ${JSON.stringify(result.entries)})">Export Detailed CSV</button>`;
+                    
+                    // Gene comparisons table
+                    html += '<h3>Comparisons per Gene</h3>';
+                    html += '<table>';
+                    html += '<tr><th>Gene</th><th class="number-cell">Number of Comparisons</th></tr>';
+                    for (const [gene, count] of Object.entries(result.geneCounts)) {
+                        if (!searchTerm || gene.toLowerCase().includes(searchTerm)) {
+                            html += `<tr><td>${gene}</td><td class="number-cell">${count}</td></tr>`;
+                        }
+                    }
+                    html += '</table>';
+                    
+                    // Detailed data table
+                    html += '<table>';
+                    html += '<tr><th>Sequence 1</th><th>Sequence 2</th><th class="number-cell">Ka</th><th class="number-cell">Ks</th><th class="number-cell">Ka/Ks</th><th class="number-cell">Effective Length</th></tr>';
+                    
+                    result.entries.forEach(entry => {
+                        if ((searchTerm && !entry.sequence1.toLowerCase().includes(searchTerm) && !entry.sequence2.toLowerCase().includes(searchTerm)) ||
+                            (filterKaks && entry.ka_ks <= 1) ||
+                            (minEffLen > 0 && (entry.effectiveLen === Infinity || entry.effectiveLen < minEffLen))) {
+                            return;
+                        }
+                        html += `<tr>
+                            <td>${entry.sequence1}</td>
+                            <td>${entry.sequence2}</td>
+                            <td class="number-cell">${formatNumber(entry.ka)}</td>
+                            <td class="number-cell">${formatNumber(entry.ks)}</td>
+                            <td class="number-cell" style="color: ${getKaKsColor(entry.ka_ks)}">${formatNumber(entry.ka_ks)}</td>
+                            <td class="number-cell">${entry.effectiveLen !== Infinity ? formatNumber(entry.effectiveLen) : 'N/A'}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</table>';
+                });
+                
+                resultsDiv.innerHTML = html;
+            }
+            
+            function exportDetailedCSV(filename, entries) {
+                const headers = ['Sequence 1', 'Sequence 2', 'Ka', 'Ks', 'Ka/Ks', 'Effective Length'];
+                const rows = [headers];
+                entries.forEach(entry => {
+                    rows.push([
+                        entry.sequence1,
+                        entry.sequence2,
+                        formatNumber(entry.ka),
+                        formatNumber(entry.ks),
+                        formatNumber(entry.ka_ks),
+                        entry.effectiveLen !== Infinity ? formatNumber(entry.effectiveLen) : 'N/A'
+                    ]);
+                });
+                exportToCSV(`${filename}_detailed.csv`, rows);
+            }
+        });
+    </script>
+</body>
+</html>
